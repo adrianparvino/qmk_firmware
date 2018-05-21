@@ -1,4 +1,5 @@
 #define TAPPING_TERM 1000
+#define MODS_SHIFT_MASK  (MOD_BIT(KC_LSHIFT)|MOD_BIT(KC_RSHIFT))
 
 #include QMK_KEYBOARD_H
 
@@ -13,6 +14,8 @@ extern keymap_config_t keymap_config;
 #define _DVORAK 2
 #define _LOWER 3
 #define _RAISE 4
+#define _VIM 5
+
 #define _ADJUST 16
 
 enum custom_keycodes {
@@ -21,8 +24,21 @@ enum custom_keycodes {
   DVORAK,
   LOWER,
   RAISE,
+  VIM,
+
+  MLEFT,
+  MDOWN,
+  MUP,
+  MRGHT,
+  MSHFT,
+
   ADJUST,
 };
+
+bool mshifting = false;
+bool mdir[4] = { false, false, false, false };
+const int mdir_to_kc  [4] = { KC_LEFT, KC_DOWN,   KC_UP, KC_RGHT };
+const int mdir_to_kc_s[4] = { KC_HOME, KC_PGDN, KC_PGUP, KC_END };
 
 // Fillers to make layering more clear
 #define _______ KC_TRNS
@@ -35,20 +51,20 @@ enum custom_keycodes {
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 /* Qwerty
  * ,-----------------------------------------------------------------------------------.
- * | Tab  |   Q  |   W  |   E  |   R  |   T  |   Y  |   U  |   I  |   O  |   P  | Esc  |
+ * | Tab  |   Q  |   W  |   E  |   R  |   T  |   Y  |   U  |   I  |   O  |   P  | ---- |
  * |------+------+------+------+------+-------------+------+------+------+------+------|
  * | Bksp |   A  |   S  |   D  |   F  |   G  |   H  |   J  |   K  |   L  |   ;  |  "   |
  * |------+------+------+------+------+------|------+------+------+------+------+------|
  * | Shift|   Z  |   X  |   C  |   V  |   B  |   N  |   M  |   ,  |   .  |   /  |SftEnt|
  * |------+------+------+------+------+------+------+------+------+------+------+------|
- * |Adjust| Ctrl | GUI  | Ctrl |Lower | Space| Shift|Raise | Alt  | Down |  Up  |Right |
+ * |Adjust| Ctrl | GUI  | Ctrl |Lower | Space| Space|Raise | Alt  | Down |  Up  | Esc  |
  * `-----------------------------------------------------------------------------------'
  */
 [_QWERTY] = LAYOUT_ortho_4x12(
-   KC_TAB,  KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_Y,    KC_U,    KC_I,    KC_O,    KC_P,    KC_ENT,  \
+   KC_TAB,  KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_Y,    KC_U,    KC_I,    KC_O,    KC_P,    _______,  \
    KC_BSPC, KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_H,    KC_J,    KC_K,    KC_L,    KC_SCLN, KC_QUOT, \
    KC_LSFT, KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_N,    KC_M,    KC_COMM, KC_DOT,  KC_SLSH, SFT_T(KC_ENT), \
-   ADJUST,  KC_LCTL, KC_LGUI, KC_RCTL, LOWER,   KC_SPC,  KC_SPC,  RAISE,   KC_RALT, KC_DOWN, KC_UP,   KC_ESC   \
+   VIM,     KC_LCTL, KC_LGUI, KC_RCTL, LOWER,   KC_SPC,  KC_SPC,  RAISE,   KC_RALT, KC_DOWN, KC_UP,   KC_ESC   \
 ),
 
 /* Colemak
@@ -134,11 +150,17 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  * |      |      |      |      |      |             |      |      |      |      |      |
  * `-----------------------------------------------------------------------------------'
  */
+[_VIM] =LAYOUT_ortho_4x12( \
+  _______, _______, _______, _______, _______, _______, MDOWN  , MRGHT  , _______, _______, _______, _______, \
+  _______, _______, _______, _______, _______, _______, MLEFT  , _______, _______, _______, _______, _______, \
+  MSHFT  , _______, _______, _______, _______, _______, MUP    , _______, _______, _______, _______, _______, \
+  _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______  \
+),
 [_ADJUST] =  LAYOUT_ortho_4x12( \
-  _______, RESET,   _______, _______, _______, _______, _______, _______, _______, _______, _______, KC_DEL, \
+  _______, RESET,   _______, _______, _______, _______, _______, _______, _______, _______, _______, KC_DEL,  \
   _______, _______, _______, AU_ON,   AU_OFF,  AG_NORM, AG_SWAP, QWERTY,  COLEMAK, DVORAK,  _______, _______, \
   _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, \
-  _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______ \
+  _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______  \
 )
 
 
@@ -211,6 +233,36 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         layer_off(_ADJUST);
       }
       return false;
+      break;
+    case VIM:
+      if (record->event.pressed) {
+        mshifting = false;
+        layer_on(_VIM);
+      } else {
+        layer_off(_VIM);
+      }
+      return false;
+      break;
+    case MSHFT:
+      mshifting = record->event.pressed;
+      break;
+    case MLEFT:
+    case MDOWN:
+    case MUP:
+    case MRGHT:
+      if (record->event.pressed) {
+        if (mshifting) {
+          register_code(mdir_to_kc_s[keycode - MLEFT]);
+        } else {
+          register_code(mdir_to_kc[keycode - MLEFT]);
+        }
+      } else {
+        if (mshifting) {
+          unregister_code(mdir_to_kc_s[keycode - MLEFT]);
+        } else {
+          unregister_code(mdir_to_kc[keycode - MLEFT]);
+        }
+      }
       break;
   }
   return true;
